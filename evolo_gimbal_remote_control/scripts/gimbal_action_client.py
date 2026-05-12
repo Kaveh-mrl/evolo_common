@@ -116,7 +116,7 @@ class Camera_control_client:
 
                     #Geopoint POI
                     elif command_type == "GEO_POI": #POI callback
-                        _goal._set_goal(self.gimbal_set_geopoint_ac, {
+                        _goal = self._set_goal(self.gimbal_set_geopoint_ac, {
                             "latitude": self.json_cmd["latitude"],
                             "longitude": self.json_cmd["longitude"],
                             "altitude": self.json_cmd["altitude"]
@@ -129,11 +129,18 @@ class Camera_control_client:
 
                     # Track
                     elif command_type == "TRACK": #Image POI
-                        pass # Not implemented yet
+                        _goal = self._set_goal(self.gimbal_track_img_poi_ac, {})
+                        try:
+                            self.gimbal_track_img_poi_ac.send_goal(_goal)
+                            self._node.get_logger().info(f"Set goal for {self.gimbal_track_img_poi_ac.action_type}.")
+
+                            #TODO set settings for yolo tracking action server too
+                        except Exception as e:
+                            self._node.get_logger().error(f"Error sending goal to AC {self.gimbal_track_img_poi_ac.action_type} : {e}.")
                     
                     # Stop
                     elif command_type == "STOP": #Stop
-                        _goal._set_goal(self.gimbal_stop_ac, {})
+                        _goal = self._set_goal(self.gimbal_stop_ac, {})
                         try:
                             self.gimbal_stop_ac.send_goal(_goal)
                             self._node.get_logger().info(f"Set goal for {self.gimbal_stop_ac.action_type}.")
@@ -161,8 +168,8 @@ class Camera_control_client:
                     self._node.get_logger().error(f"Falied to set goal: {e}")
 
             #Yolo threshold settings
-            if("threshold" in self.json_cmd.keys()):
-                threshold = self.json_cmd["threshold"]
+            if("detection_threshold" in self.json_cmd.keys()):
+                threshold = self.json_cmd["detection_threshold"]
                 try:
                     _goal = self._set_goal(self.yolo_threshold_ac, {
                             "threshold": threshold
