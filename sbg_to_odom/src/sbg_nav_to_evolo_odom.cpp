@@ -15,8 +15,11 @@
 #include "tf2_ros/transform_listener.h"
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_broadcaster.h"
+#include <tf2/LinearMath/Quaternion.h>
+#include <tf2/LinearMath/Matrix3x3.h>
 
 #include "std_msgs/msg/header.hpp"
+#include "std_msgs/msg/float32.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/point.hpp"
 #include "geometry_msgs/msg/quaternion.hpp"
@@ -39,6 +42,11 @@ class SbgToOdom : public rclcpp::Node {
     latlon_pub_ = this->create_publisher<geographic_msgs::msg::GeoPoint>(
         "smarc/latlon", 10);
 
+    altitude_pub_ = this->create_publisher<std_msgs::msg::Float32>("smarc/altitude", 10);
+    course_pub_ = this->create_publisher<std_msgs::msg::Float32>("smarc/course", 10);
+    heading_pub_ = this->create_publisher<std_msgs::msg::Float32>("smarc/heading", 10);
+    speed_pub_ = this->create_publisher<std_msgs::msg::Float32>("smarc/speed", 10);
+    
     sbg_nav_sub_ = this->create_subscription<sbg_driver::msg::SbgEkfNav>(
         "sbg/ekf_nav", 10,
         std::bind(&SbgToOdom::SbgNavCallback, this, std::placeholders::_1));
@@ -108,6 +116,10 @@ class SbgToOdom : public rclcpp::Node {
 
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
   rclcpp::Publisher<geographic_msgs::msg::GeoPoint>::SharedPtr latlon_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr altitude_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr course_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr heading_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr speed_pub_;
   rclcpp::Subscription<sbg_driver::msg::SbgEkfNav>::SharedPtr sbg_nav_sub_;
   rclcpp::Subscription<sbg_driver::msg::SbgEkfQuat>::SharedPtr sbg_quat_sub_;
   rclcpp::Subscription<sbg_driver::msg::SbgImuData>::SharedPtr sbg_imu_sub_;
@@ -235,6 +247,41 @@ class SbgToOdom : public rclcpp::Node {
     odom_pub_->publish(OdomToMessage());
 
     latlon_pub_->publish(LatLonToMessage());
+
+    //convert quaternion to euler angles for course and heading
+    tf2::Quaternion q(
+        quat_msg.x,
+        quat_msg.y,
+        quat_msg.z,
+        quat_msg.w);
+
+    double roll, pitch, yaw;
+    tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
+
+    double heading = 90.0 - (180.0*yaw / M_PI);
+    if(heading < 0) heading += 360;
+    if(heading > 360) heading -=360;
+
+    double course = heading - (-180.0*atan2(y_vel, x_vel) / M_PI);
+    if(course < 0) course += 360;
+    if(course > 360) course -=360;
+
+    double speed = sqrt(x_vel*x_vel + y_vel*y_vel);
+
+    std_msgs::msg::Float32 altitude_msg;
+    std_msgs::msg::Float32 course_msg;
+    std_msgs::msg::Float32 heading_msg;
+    std_msgs::msg::Float32 speed_msg;
+    
+    altitude_msg.data = altitude_;
+    course_msg.data = course;
+    heading_msg.data = heading;
+    speed_msg.data = speed;
+
+    altitude_pub_->publish(altitude_msg);
+    course_pub_->publish(course_msg);
+    heading_pub_->publish(heading_msg);
+    speed_pub_->publish(speed_msg);
 
     //Broadcast base_link transform
     geometry_msgs::msg::TransformStamped t;
