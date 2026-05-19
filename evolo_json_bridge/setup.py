@@ -1,7 +1,7 @@
 from setuptools import find_packages, setup
 import glob, os
 
-package_name = 'evolo_node_red_interface'
+package_name = 'evolo_json_bridge'
 
 setup(
     name=package_name,
@@ -27,7 +27,7 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'translator = evolo_node_red_interface.evolo_to_node_red_translator:main',
+            'translator = evolo_json_bridge.evolo_json_bridge:main',
         ],
     },
 )

@@ -26,14 +26,10 @@ class Translator(Node):
 
         #Subscribte topics
         # SBG
-        # BT feedback
         # Sidescan
 
         self.declare_parameter('sbg_ekf_nav_topic', "/evolo/sbg/ekf_nav")
         self.sbg_nav_subscribe_topic = self.get_parameter('sbg_ekf_nav_topic').value
-
-        self.declare_parameter('BT_executing_tasks', "/evolo/waraps/sensor/executing_tasks")
-        self.BT_executing_tasks_topic = self.get_parameter('BT_executing_tasks').value
         
         self.declare_parameter('sss_topic', "/payload/sidescan")
         self.sss_topic = self.get_parameter('sss_topic').value
@@ -41,9 +37,6 @@ class Translator(Node):
         #messages
         self.sbg_ekf_nav_msg = SbgEkfNav()
         self.sbg_ekf_nav_msg_time = self.time_now()
-
-        self.BT_executing_tasks_msg = String()
-        self.BT_executing_tasks_msg_time = self.time_now()
 
         self.sss_msg = Sidescan()
         self.sss_msg_time = self.time_now()
@@ -56,9 +49,6 @@ class Translator(Node):
         self.sbg_ekf_subscription = self.create_subscription(SbgEkfNav,self.sbg_nav_subscribe_topic, self.sbg_ekf_nav_callback,10)
         self.sbg_ekf_subscription # prevent unused variable warning
 
-        self.BT_subscription = self.create_subscription(String,self.BT_executing_tasks_topic, self.bt_executing_tasks_callback,10)
-        self.BT_subscription # prevent unused variable warning
-
         self.sss_subscription = self.create_subscription(Sidescan,self.sss_topic, self.sss_callback,10)
 
         self.timer = self.create_timer(1.0, self.timer_callback)
@@ -70,17 +60,13 @@ class Translator(Node):
         self.sbg_ekf_nav_msg = msg
         self.sbg_ekf_nav_msg_time = self.time_now()
 
-    def bt_executing_tasks_callback(self, msg):
-        self.BT_executing_tasks_msg = msg
-        self.BT_executing_tasks_msg_time = self.time_now()
-
     def sss_callback(self, msg : Sidescan):
         self.sss_msg = msg
         self.sss_msg_time = self.time_now()
 
         #Convert sidescan message and republish
-
-        json_data = {"range":1500.0 * self.sss_msg .max_duration,
+        range = 1500.0 * self.sss_msg.max_duration if self.sss_msg.max_duration != 0 else 100.0
+        json_data = {"range": range,
                      "frequency":200,
                      "starboard_channel": [int(i) for i in self.sss_msg.starboard_channel], 
                      "port_channel": [int(i) for i in self.sss_msg.port_channel]}
@@ -125,17 +111,12 @@ class Translator(Node):
         #Sidescan
         sidescan_ok = "YES" if self.time_now() - self.sss_msg_time < 2 else "NO"
 
-        #TODO get lidar status from health monitor
-
-        #TODO get camera status from health monitor
-
         data = {"sbg_status": sbg_status, 
                 "sbg_aligned": sbg_aligned,
                 "sbg_heading_valid": sbg_heading_valid,
                 "sbg_heading_used": sbg_heading_used,
-                "sidescan_ok: ": sidescan_ok,
-                "lidar_ok": "not checked",
-                "camera_ok": "not checked"}
+                "sidescan_ok: ": sidescan_ok
+                }
 
         msg = String()
         msg.data = json.dumps({"scientist_status": data})
