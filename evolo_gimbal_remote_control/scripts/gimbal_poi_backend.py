@@ -102,11 +102,11 @@ class GimbalPoiBackend(Node):
 
         # Staleness thresholds.  If a sensor message is older than its
         # max_age_s we treat the measurement as unavailable.
-        self.declare_parameter("gcu_max_age_s", 2.0)
-        self.declare_parameter("odom_max_age_s", 2.0)
+        self.declare_parameter("gcu_max_age_s", 1.0)
+        self.declare_parameter("odom_max_age_s", 1.0)
 
         # Forward (surge) speed commanded to the vehicle during tracking.
-        self.declare_parameter("forward_speed_mps", 0.5)
+        self.declare_parameter("forward_speed_mps", 5.0)
 
         # The candidate path is minimal: two poses at current position and a
         # point lookahead_m ahead in the current vehicle heading direction.
@@ -158,7 +158,7 @@ class GimbalPoiBackend(Node):
             Path, "backend/candidate_path", 10)
 
         # backend/control_planned carries the unified control setpoint:
-        #   pose.pose.orientation — desired vehicle heading in ENU/odom frame
+        #   pose.pose.orientation — desired vehicle heading in ENU/odom frame.
         #   twist.twist.linear.x  — forward surge speed in body frame
         self._control_pub = self.create_publisher(
             Odometry, "backend/control_planned", 10)
@@ -447,15 +447,23 @@ class GimbalPoiBackend(Node):
         # freshness of each independently.
         self._publish_candidate_path(now_msg, frame_id, target_yaw)
         self._publish_control(now_msg, frame_id, target_yaw)
+
+        base_text = "GIMBAL_POI_YAW_OVERRIDE_YOLO_BBOX" if bbox_large else "GIMBAL_POI_YAW_OVERRIDE_YOLO"
+        status_text = (
+            f"{base_text} | vehicle_yaw={math.degrees(vehicle_yaw):.1f}deg"
+            f" gimbal={math.degrees(gimbal_yaw_rad):.1f}deg"
+            f" pixel_offset={math.degrees(pixel_offset_rad):.1f}deg"
+            f" target_yaw={math.degrees(target_yaw):.1f}deg"
+            + (f" bbox_area={self._last_det_area:.0f}px2"
+               f" confirmed={confirmed_duration:.1f}s" if bbox_large else
+               f" bbox_area={self._last_det_area:.0f}px2" if self._last_det_area is not None else "")
+        )
         self._publish_running_status(
             target_lost=False,
             plan_available=True,
             mode=mode,
             target_intercepted=target_intercepted,
-            status_text=(
-                "GIMBAL_POI_YAW_OVERRIDE_YOLO_BBOX"
-                if bbox_large else "GIMBAL_POI_YAW_OVERRIDE_YOLO"
-            ),
+            status_text=status_text,
         )
 
     # ------------------------------------------------------------------ #
