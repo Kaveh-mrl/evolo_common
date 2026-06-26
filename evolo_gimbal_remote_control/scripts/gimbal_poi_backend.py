@@ -29,11 +29,14 @@ target_lost=True, plan_available=False.  The vehicle does NOT follow anything
 sufficient: without visual confirmation we cannot know whether the gimbal is
 still pointing at the real target or at a stale geographic position.
 
---- YOLO detection filtering -----------------------------------------------
+--- YOLO target selection --------------------------------------------------
 
-Only detections from /yolo/tracking that have a non-empty 'id' field are used.
-Untracked detections (id == "") are discarded because they may be one-shot
-false positives that the tracker has not yet committed to.
+Target selection lives upstream in yolo_action.py, which applies the
+which-id-to-follow / lock / timeout / re-acquire policy and republishes the
+single chosen detection on /yolo/target (0 or 1 detection per message). This
+backend simply consumes that choice, so the gimbal and the vehicle always
+follow the same object. (yolo_action already discards untracked id == ""
+boxes, so anything we receive here is a committed track.)
 
 --- Inspect-transition logic -----------------------------------------------
 
@@ -55,7 +58,8 @@ enough for inspection.  Without a valid YOLO detection the timer never starts.
 
 --- Additional subscriptions -----------------------------------------------
   <gcudata_topic>    z1_pro_msgs/Gcudata         — gimbal relative_yaw
-  <detections_topic> yolo_msgs/DetectionArray    — required; id-filtered
+  <detections_topic> yolo_msgs/DetectionArray    — /yolo/target: the id-locked
+                                                   single target from yolo_action
   smarc/odom         nav_msgs/Odometry           — vehicle pose (ENU frame)
 
 --- State machine -----------------------------------------------------------
@@ -97,7 +101,12 @@ class GimbalPoiBackend(Node):
         # ------------------------------------------------------------------ #
         self.declare_parameter("gcudata_topic",
                                "/evolo/gimbal_camera/gimbal_gcu_fb")
-        self.declare_parameter("detections_topic", "/yolo/tracking")
+        # The id-locked single-target stream from yolo_action's selector (0 or 1
+        # detection per message). We deliberately do NOT subscribe to the full
+        # /yolo/tracking list any more: target selection (which id to follow,
+        # lock + timeout + re-acquire) lives in one place (yolo_action.py) so the
+        # gimbal and this vehicle backend always follow the SAME object.
+        self.declare_parameter("detections_topic", "/yolo/target")
         self.declare_parameter("publish_frequency_hz", 10.0)
 
         # Staleness thresholds.  If a sensor message is older than its
@@ -290,32 +299,38 @@ class GimbalPoiBackend(Node):
 
     def _detections_cb(self, msg) -> None:
         """
-        Pick the best id-filtered YOLO detection and cache what we need.
+        Cache the id-locked target chosen upstream by yolo_action's selector.
 
-        Filtering rules:
-          1. Discard detections whose 'id' field is empty.  These are
-             one-shot detections that the tracker has not committed to; using
-             them could cause the vehicle to swerve toward false positives.
-          2. Among the remaining (tracked) detections, pick the one with the
-             highest confidence score.
+        We subscribe to /yolo/target, not /yolo/tracking: the selection /
+        lock / timeout / re-acquire policy lives in one place (yolo_action.py),
+        so the gimbal and this vehicle backend always follow the SAME object.
+        Each message carries at most one detection — the currently locked
+        target — or is empty while the selector is between locks or coasting
+        through a brief loss.
 
         We store only:
           _last_det_cx   — bbox centre x in pixels (for pixel-offset correction)
           _last_det_area — bbox width * height in px²  (for inspect transition)
+
+        Note on timing: the selector's lock_timeout (a few seconds) is longer
+        than our detection_max_age_s (default 1.0 s). During a brief loss the
+        selector publishes empty messages and holds its lock; we let our own
+        staleness check expire and report target_lost (the vehicle loiters)
+        rather than dead-reckoning toward a stale bbox — the gimbal meanwhile
+        holds its angle. If the same id reappears within lock_timeout, tracking
+        resumes seamlessly.
         """
-        # Filter to id-confirmed (tracked) detections only.
-        tracked = [d for d in msg.detections if d.id != ""]
-        if not tracked:
-            # No tracked detection this frame — do NOT clear the cache; let
-            # the staleness check in _publish_tick handle expiry.
+        # Empty -> selector has no committed target right now. Do NOT clear the
+        # cache; let the staleness check in _publish_tick handle expiry.
+        if not msg.detections:
             return
 
-        # Best tracked detection by confidence.
-        best = max(tracked, key=lambda d: d.score)
+        # The selector already chose the single target; just take it.
+        target = msg.detections[0]
 
-        self._last_det_cx = best.bbox.center.position.x
+        self._last_det_cx = target.bbox.center.position.x
         # yolo_msgs BoundingBox2D uses size.x / size.y for width / height.
-        self._last_det_area = best.bbox.size.x * best.bbox.size.y
+        self._last_det_area = target.bbox.size.x * target.bbox.size.y
         self._last_det_time = self._now_s
 
     # ------------------------------------------------------------------ #
